@@ -180,7 +180,7 @@ def check_login_system(base_dir):
                         target_ma = str(st.session_state.get('current_manv', '')).strip()
                         idx = df_cb[df_cb['MaNV'].str.strip() == target_ma].index
                         if not idx.empty:
-                            # 🔑 Băm SHA-256 mật khẩu mới trước khi lưu xuống file Excel
+                            # 🔑 Băm SHA-256 mật khẩu mới trước khi ghi vào file
                             df_cb.loc[idx, 'MatKhau'] = str(hash_password(new_pass.strip()))
                             df_cb.loc[idx, 'TrangThai'] = False
                             df_cb.to_excel(path_canbo, index=False)
@@ -339,25 +339,18 @@ if report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
             st.markdown("---")
             st.subheader("📋 Bảng Tổng Hợp Kết Quả Tiếp Quỹ & Thu Gom")
             
-            # Danh sách các cột số liệu cần định dạng dấu phẩy hàng nghìn
-            numeric_cols_th = [
-                'Tinh_Luot', 'Tinh_Phong', 
-                'Bo_VND', 'VND_ThanhTien', 
-                'Bo_USD', 'USD_ThanhTien', 
-                'Bo_EUR', 'EUR_ThanhTien', 
-                'Bo_JPY', 'JPY_ThanhTien', 
-                'Bo_Khac', 'Tinh_KM_Tuyen', 'Tinh_KM_Phong'
-            ]
-            
-            df_display = final_table.copy()
-            
-            format_dict_th = {}
-            for col in numeric_cols_th:
-                if col in df_display.columns:
-                    format_dict_th[col] = lambda x: "{:,.0f}".format(float(x)) if pd.notnull(x) and str(x).strip() != '' and str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x
+            # Định dạng số có dấu phẩy phân tách hàng nghìn khi hiển thị giao diện Web
+            def format_numeric_df(input_df):
+                formatted_df = input_df.copy()
+                for col in formatted_df.columns:
+                    if col not in ["LoaiNghiepVu", "CoSo", "LoaiDoiTuong"]:
+                        formatted_df[col] = formatted_df[col].apply(
+                            lambda x: "{:,.0f}".format(float(x)) if pd.notnull(x) and str(x).strip() != '' and str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x
+                        )
+                return formatted_df
 
-            # Hiển thị bảng trên web có định dạng dấu phẩy hàng nghìn chuẩn xác
-            st.dataframe(df_display.style.format(format_dict_th), use_container_width=True)
+            df_display = format_numeric_df(final_table)
+            st.dataframe(df_display, use_container_width=True)
             
             st.markdown("---")
             st.subheader("📥 KẾT QUẢ XUẤT FILE BÁO CÁO")
