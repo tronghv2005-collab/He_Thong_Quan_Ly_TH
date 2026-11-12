@@ -23,7 +23,7 @@ def process_flat_header(file_path):
         df = pd.read_excel(file_path, header=0)
 
     new_columns = []
-    current_currency = "THONGTIN"
+    current_currency = "VND"
     
     for col in df.columns:
         try:
@@ -34,7 +34,13 @@ def process_flat_header(file_path):
                 c1 = str(col).strip()
                 c2 = ""
             
-            if "Unnamed" not in c1 and c1 != "" and "nan" not in c1.lower(): 
+            c1_upper = c1.upper()
+            if any(curr in c1_upper for curr in ['VND', 'USD', 'EUR', 'JPY']):
+                for curr in ['VND', 'USD', 'EUR', 'JPY']:
+                    if curr in c1_upper:
+                        current_currency = curr
+                        break
+            elif "Unnamed" not in c1 and c1 != "" and "nan" not in c1.lower(): 
                 current_currency = c1.upper().strip()
                 
             clean1, clean2 = no_accent_vietnamese(c1), no_accent_vietnamese(c2)
@@ -61,7 +67,8 @@ def process_flat_header(file_path):
             elif "diadiem" in c_combined or "noplinh" in c_combined:
                 new_columns.append("DiaDiemNopLinh")
             elif "thanh tien" in c2.lower() or "thanhtien" in clean1 or "thanhtien" in clean2: 
-                new_columns.append(f"{current_currency}_ThanhTien")
+                matched_cc = next((cc for cc in ['VND', 'USD', 'EUR', 'JPY'] if cc in current_currency or cc in c1.upper()), "VND")
+                new_columns.append(f"{matched_cc}_ThanhTien")
             else: 
                 denom_clean = re.sub(r'[.,\s]', '', c2)
                 if denom_clean.isdigit():
@@ -206,7 +213,7 @@ def _finalize_file_data(df, is_file2=False):
     for cc in cac_tien_chinh:
         m_cols = main_money_cols[cc]
         df[f'To_Sum_{cc}'] = df[m_cols].fillna(0).apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if m_cols else 0
-        t_col = next((c for c in df.columns if f"{cc}_ThanhTien" in c), None)
+        t_col = next((c for c in df.columns if f"{cc}_ThanhTien" in c or c.upper() == f"{cc}_THANHTIEN"), None)
         df[f'{cc}_ThanhTien_Raw'] = pd.to_numeric(df.get(t_col, 0), errors='coerce').fillna(0) if t_col else 0
 
     flat_main_cols = [c for cols in main_money_cols.values() for c in cols]
@@ -441,7 +448,7 @@ def format_summary_dataframe(df_prev, df_curr, all_nghiep_vu, all_coso):
     check_cols = [c for c in f_df.columns if c not in ['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong']]
     f_df = f_df[(f_df[check_cols] != 0).any(axis=1)].copy()
     return f_df
-import openpyxl
+
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -460,14 +467,12 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
         ws = wb.active
         ws.title = "BaoCao_TongHop"
 
-    # Định dạng style chung cho Header & Tiêu đề
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left_align = Alignment(horizontal='left', vertical='center')
     right_align = Alignment(horizontal='right', vertical='center')
     
-    # 1. CHÈN VÀ CĂN GIỮA TIÊU ĐỀ KỲ BÁO CÁO Ở PHẦN HEADER
     if start_prev and end_prev and start_curr and end_curr:
-        ws.insert_rows(1, amount=4) # Chèn 4 dòng phía trên
+        ws.insert_rows(1, amount=4)
         
         ws['A1'] = "HỆ THỐNG TRUNG TÂM TIẾP QUỸ & NHNN - BÁO CÁO TỔNG HỢP HOẠT ĐỘNG"
         ws['A1'].font = Font(bold=True, size=13, color="1F4E78")
@@ -518,7 +523,6 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
                         target_col = 4 + idx
                         ws.cell(row=r, column=target_col).value = m[k]
 
-        # 2. ĐỊNH DẠNG SỐ LIỆU (LÀM TRÒN KHÔNG SỐ LẺ + DẤU PHẨY NGĂN CÁCH HÀNG NGHÌN) & CĂN CHỈNH CỘT
         header_row_idx = start_row - 1 if not os.path.exists(template_path) else start_row - 1
         
         for col_idx in range(1, ws.max_column + 1):
@@ -529,23 +533,19 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
                 cell = ws.cell(row=row_idx, column=col_idx)
                 val = cell.value
                 
-                # Căn lề: Cột chữ căn trái/giữa, cột số lượng/tiền tệ căn phải
                 if row_idx == header_row_idx:
                     cell.alignment = center_align
                     cell.font = Font(bold=True, size=10, color="FFFFFF")
-                    # Tô nền xanh đậm cho tiêu đề bảng
                     cell.fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
                 else:
                     if col_idx <= 3:
                         cell.alignment = left_align
                     else:
                         cell.alignment = right_align
-                        # Định dạng số nguyên: không số lẻ, có dấu phẩy ngăn cách hàng nghìn (#,##0)
                         if isinstance(val, (int, float)) and pd.notnull(val):
                             cell.number_format = '#,##0'
-                            cell.value = round(val) # Làm tròn số không để số lẻ
+                            cell.value = round(float(val))
                 
-                # Tính toán độ rộng tự động cho cột
                 val_str = str(val or '')
                 if len(val_str) > max_len:
                     max_len = len(val_str)

@@ -65,7 +65,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "templates")
 os.makedirs(SHARED_DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ==================== HỆ THỐNG XÁC THỰC & BẢO MẬT ĐĂNG NHẬP (CHUẨN MaNV) ====================
+# ==================== HỆ THỐNG XÁC THỰC & BẢO MẬT ĐĂNG NHẬP (CHUẨN MaNV & ADMIN) ====================
 def hash_password(password):
     return hashlib.sha256(str(password).encode('utf-8')).hexdigest()
 
@@ -77,7 +77,8 @@ def check_login_system(base_dir):
     if not os.path.exists(path_canbo):
         try:
             df_init_cb = pd.DataFrame([
-                {'MaNV': '12345', 'MatKhau': hash_password('00'), 'TrangThai': True, 'TenNV': '12345 - Nguyễn Văn A', 'NhomQuyen': 'KSV', 'CoSo': 'Cơ sở 1'},
+                {'MaNV': 'admin', 'MatKhau': hash_password('admin123'), 'TrangThai': False, 'TenNV': 'Quản trị viên Hệ thống', 'NhomQuyen': 'ADMIN', 'CoSo': 'Toàn trung tâm'},
+                {'MaNV': '97474', 'MatKhau': hash_password('00'), 'TrangThai': True, 'TenNV': '97474 - Nguyễn Văn A', 'NhomQuyen': 'KSV', 'CoSo': 'Cơ sở 1'},
                 {'MaNV': '67890', 'MatKhau': hash_password('00'), 'TrangThai': True, 'TenNV': '67890 - Trần Thị B', 'NhomQuyen': 'NV', 'CoSo': 'Cơ sở 2'}
             ])
             df_init_cb['MaNV'] = df_init_cb['MaNV'].astype(str)
@@ -92,6 +93,8 @@ def check_login_system(base_dir):
         st.session_state.current_user = None
     if 'current_manv' not in st.session_state:
         st.session_state.current_manv = None
+    if 'current_role' not in st.session_state:
+        st.session_state.current_role = None
     if 'force_change_pass' not in st.session_state:
         st.session_state.force_change_pass = False
 
@@ -104,7 +107,7 @@ def check_login_system(base_dir):
         st.markdown("### 🔐 ĐĂNG NHẬP HỆ THỐNG TRUNG TÂM TIẾP QUỸ & NHNN")
         
         with st.form("login_form_main"):
-            username = st.text_input("Mã cán bộ (MaNV)")
+            username = st.text_input("Mã cán bộ (MaNV) hoặc tài khoản Admin")
             password = st.text_input("Mật khẩu", type="password")
             submit_login = st.form_submit_button("Đăng nhập", type="primary")
 
@@ -119,19 +122,35 @@ def check_login_system(base_dir):
                     if not user_row.empty:
                         db_pass = str(user_row.iloc[0]['MatKhau']).strip()
                         raw_trang_thai = user_row.iloc[0]['TrangThai']
-                        is_first_login = raw_trang_thai.strip().lower() in ['true', '1', 'yes'] if isinstance(raw_trang_thai, str) else bool(raw_trang_thai)
+                        
+                        if isinstance(raw_trang_thai, str):
+                            is_first_login = raw_trang_thai.strip().lower() in ['true', '1', 'yes', 't']
+                        else:
+                            is_first_login = bool(raw_trang_thai) if pd.notnull(raw_trang_thai) else False
                         
                         input_pass_clean = password.strip()
-                        input_check = input_pass_clean if (is_first_login and (db_pass == input_pass_clean or db_pass == hash_password(input_pass_clean))) else hash_password(input_pass_clean)
+                        input_hashed = hash_password(input_pass_clean)
                         
-                        if db_pass == input_check or (is_first_login and db_pass == input_pass_clean):
+                        if db_pass == input_hashed or db_pass == input_pass_clean:
                             col_ten = next((c for c in df_cb.columns if 'ten' in str(c).lower() or 'tên' in str(c).lower()), None)
+                            col_quyen = next((c for c in df_cb.columns if 'quyen' in str(c).lower() or 'nhom' in str(c).lower()), None)
+                            
                             ten_nv = str(user_row.iloc[0][col_ten]).strip() if (col_ten and pd.notnull(user_row.iloc[0][col_ten])) else username.strip()
+                            nhom_quyen = str(user_row.iloc[0][col_quyen]).strip().upper() if (col_quyen and pd.notnull(user_row.iloc[0][col_quyen])) else "NV"
+                            
+                            if username.strip().lower() == "admin":
+                                nhom_quyen = "ADMIN"
                             
                             st.session_state.current_manv = username.strip()
                             st.session_state.current_user = ten_nv
+                            st.session_state.current_role = nhom_quyen
                             st.session_state.logged_in = True
-                            st.session_state.force_change_pass = is_first_login
+                            
+                            if nhom_quyen == "ADMIN":
+                                st.session_state.force_change_pass = False
+                            else:
+                                st.session_state.force_change_pass = bool(is_first_login)
+                                
                             st.rerun()
                         else:
                             st.error("❌ Mật khẩu không chính xác!")
@@ -143,7 +162,7 @@ def check_login_system(base_dir):
 
     if st.session_state.force_change_pass:
         st.set_page_config(page_title="Đổi Mật Khẩu Lần Đầu", page_icon="⚠️", layout="centered")
-        st.warning("⚠️ **Đăng nhập lần đầu: Vui lòng nhập mật khẩu mới để tiếp tục!**")
+        st.warning("⚠️ **Đăng nhập lần đầu hoặc sau khi được Reset: Vui lòng nhập mật khẩu mới để tiếp tục!**")
         
         with st.form("change_pass_form_main"):
             new_pass = st.text_input("Nhập mật khẩu mới", type="password", key="np1")
@@ -161,6 +180,7 @@ def check_login_system(base_dir):
                         target_ma = str(st.session_state.get('current_manv', '')).strip()
                         idx = df_cb[df_cb['MaNV'].str.strip() == target_ma].index
                         if not idx.empty:
+                            # 🔑 Băm SHA-256 mật khẩu mới trước khi lưu xuống file Excel
                             df_cb.loc[idx, 'MatKhau'] = str(hash_password(new_pass.strip()))
                             df_cb.loc[idx, 'TrangThai'] = False
                             df_cb.to_excel(path_canbo, index=False)
@@ -203,7 +223,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 HỆ THỐNG XỬ LÝ VÀ XUẤT BÁO CÁO TỰ ĐỘNG")
+st.title("📊 HỆ THỐNG QUẢN LÝ TT KHOA QUỸ")
 st.markdown("---")
 
 today = date.today()
@@ -217,29 +237,34 @@ default_kp_end = date(prev_month_year, prev_month, last_day_of_prev_month)
 
 # ==================== THANH ĐIỀU HƯỚNG (SIDEBAR) ====================
 st.sidebar.markdown(f"👤 **Tài khoản:** {st.session_state.current_user}")
+st.sidebar.markdown(f"🔑 **Phân quyền:** `{st.session_state.current_role}`")
 if st.sidebar.button("🚪 Đăng xuất", use_container_width=True):
     st.session_state.logged_in = False
     st.session_state.current_user = None
     st.session_state.current_manv = None
+    st.session_state.current_role = None
     st.session_state.force_change_pass = False
     st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ TÙY CHỌN CHỨC NĂNG")
-report_type = st.sidebar.selectbox(
-    "Chọn loại báo cáo cần thực hiện:", 
-    (
-        "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)", 
-        "Báo Cáo Nộp Lĩnh NHNN (Ds_NopLinhNHNN)",
-        "Báo Cáo Hoạt Động ATM (BC_atm)",
-        "Giao Dịch Phát Sinh Lớn (Ds_TiepQuyThuGom)",
-        "Báo Cáo XNK Theo Loại Tiền & Đối Tác",  
-        "Nhập Đăng Ký Nộp Lĩnh",  
-        "Quản Lý Lỗi / Vi Phạm",  
-        "Báo Cáo SLA Kho Quỹ",
-        "Báo Cáo KPI Cán Bộ" 
-    )
-)
+
+list_options = [
+    "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)", 
+    "Báo Cáo Nộp Lĩnh NHNN (Ds_NopLinhNHNN)",
+    "Báo Cáo Hoạt Động ATM (BC_atm)",
+    "Giao Dịch Phát Sinh Lớn (Ds_TiepQuyThuGom)",
+    "Báo Cáo XNK Theo Loại Tiền & Đối Tác",  
+    "Nhập Đăng Ký Nộp Lĩnh",  
+    "Quản Lý Lỗi / Vi Phạm",  
+    "Báo Cáo SLA Kho Quỹ",
+    "Báo Cáo KPI Cán Bộ"
+]
+
+if str(st.session_state.current_role).strip().upper() == "ADMIN":
+    list_options.append("Quản Trị Hệ Thống (Reset Mật Khẩu NV)")
+
+report_type = st.sidebar.selectbox("Chọn loại báo cáo cần thực hiện:", tuple(list_options))
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📅 Thiết lập khoảng thời gian")
@@ -313,12 +338,30 @@ if report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
 
             st.markdown("---")
             st.subheader("📋 Bảng Tổng Hợp Kết Quả Tiếp Quỹ & Thu Gom")
-            st.dataframe(final_table, use_container_width=True)
+            
+            # Danh sách các cột số liệu cần định dạng dấu phẩy hàng nghìn
+            numeric_cols_th = [
+                'Tinh_Luot', 'Tinh_Phong', 
+                'Bo_VND', 'VND_ThanhTien', 
+                'Bo_USD', 'USD_ThanhTien', 
+                'Bo_EUR', 'EUR_ThanhTien', 
+                'Bo_JPY', 'JPY_ThanhTien', 
+                'Bo_Khac', 'Tinh_KM_Tuyen', 'Tinh_KM_Phong'
+            ]
+            
+            df_display = final_table.copy()
+            
+            format_dict_th = {}
+            for col in numeric_cols_th:
+                if col in df_display.columns:
+                    format_dict_th[col] = lambda x: "{:,.0f}".format(float(x)) if pd.notnull(x) and str(x).strip() != '' and str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x
+
+            # Hiển thị bảng trên web có định dạng dấu phẩy hàng nghìn chuẩn xác
+            st.dataframe(df_display.style.format(format_dict_th), use_container_width=True)
             
             st.markdown("---")
             st.subheader("📥 KẾT QUẢ XUẤT FILE BÁO CÁO")
             
-            # Chia làm 2 cột song song để đặt 2 nút tải độc lập, không bị thoát app
             c_dl1, c_dl2 = st.columns(2)
             
             with c_dl1:
@@ -394,6 +437,36 @@ elif report_type == "Báo Cáo SLA Kho Quỹ":
 elif report_type == "Báo Cáo KPI Cán Bộ":
     if kpi_module and hasattr(kpi_module, "show_kpi_report_page"):
         kpi_module.show_kpi_report_page()
+
+elif report_type == "Quản Trị Hệ Thống (Reset Mật Khẩu NV)":
+    st.subheader("🛠️ QUẢN TRỊ HỆ THỐNG - QUẢN LÝ TÀI KHOẢN & RESET MẬT KHẨU")
+    
+    path_canbo = os.path.join(BASE_DIR, "parameters", "Thamso_canbo.xlsx")
+    if os.path.exists(path_canbo):
+        try:
+            df_cb = pd.read_excel(path_canbo, dtype={'MaNV': str})
+            st.write("📋 **Danh sách cán bộ hiện tại trong hệ thống:**")
+            st.dataframe(df_cb[['MaNV', 'TenNV', 'NhomQuyen', 'CoSo', 'TrangThai']], use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("#### 🔄 Cấp lại / Reset Mật khẩu cho nhân viên")
+            with st.form("admin_reset_form"):
+                list_ma_nv = df_cb['MaNV'].tolist()
+                selected_nv = st.selectbox("Chọn Mã Cán Bộ cần reset mật khẩu:", list_ma_nv)
+                new_default_pass = st.text_input("Mật khẩu mới (hoặc mật khẩu mặc định):", value="00")
+                
+                submit_reset = st.form_submit_button("Xác nhận Reset Mật Khẩu", type="primary")
+                if submit_reset:
+                    idx = df_cb[df_cb['MaNV'].str.strip() == str(selected_nv).strip()].index
+                    if not idx.empty:
+                        df_cb.loc[idx, 'MatKhau'] = str(hash_password(new_default_pass.strip()))
+                        df_cb.loc[idx, 'TrangThai'] = True
+                        df_cb.to_excel(path_canbo, index=False)
+                        st.success(f"🎉 Đã reset mật khẩu thành công cho Mã cán bộ: **{selected_nv}** với mật khẩu mới: `{new_default_pass}`! (Nhân viên sẽ bắt buộc phải đổi mật khẩu khi đăng nhập).")
+        except Exception as e:
+            st.error(f"❌ Lỗi đọc file danh sách cán bộ: {e}")
+    else:
+        st.warning("⚠️ Không tìm thấy file `Thamso_canbo.xlsx` trong thư mục `parameters`.")
 
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: gray;'>Hệ thống báo cáo nội bộ tự động hóa • Tích hợp hiển thị Web & Tải file</p>", unsafe_allow_html=True)
