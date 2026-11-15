@@ -57,6 +57,12 @@ try:
 except ImportError:
     bc_word = None
 
+# Bổ sung module Giao Dịch Tiền Mới
+try:
+    import nhap_tien_moi
+except ImportError:
+    nhap_tien_moi = None
+
 # ==================== ĐỊNH NGHĨA THƯ MỤC DÙNG CHUNG ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_DATA_DIR = os.path.join(BASE_DIR, "data_source")
@@ -65,7 +71,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "templates")
 os.makedirs(SHARED_DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ==================== HỆ THỐNG XÁC THỰC & BẢO MẬT ĐĂNG NHẬP (CHUẨN MaNV & ADMIN) ====================
+# ==================== HỆ THỐNG XÁC THỰC & BẢO MẬT ĐĂNG NHẬP ====================
 def hash_password(password):
     return hashlib.sha256(str(password).encode('utf-8')).hexdigest()
 
@@ -83,6 +89,7 @@ def check_login_system(base_dir):
             ])
             df_init_cb['MaNV'] = df_init_cb['MaNV'].astype(str)
             df_init_cb['MatKhau'] = df_init_cb['MatKhau'].astype(str)
+            df_init_cb['TrangThai'] = df_init_cb['TrangThai'].astype(bool)
             df_init_cb.to_excel(path_canbo, index=False)
         except:
             pass
@@ -177,10 +184,17 @@ def check_login_system(base_dir):
                 else:
                     try:
                         df_cb = pd.read_excel(path_canbo, dtype={'MaNV': str, 'MatKhau': str})
+                        
+                        # Chuẩn hóa cột TrangThai thành bool để tránh lỗi dtype float64
+                        if 'TrangThai' in df_cb.columns:
+                            df_cb['TrangThai'] = df_cb['TrangThai'].astype(bool)
+                        else:
+                            df_cb['TrangThai'] = False
+
                         target_ma = str(st.session_state.get('current_manv', '')).strip()
                         idx = df_cb[df_cb['MaNV'].str.strip() == target_ma].index
+                        
                         if not idx.empty:
-                            # 🔑 Băm SHA-256 mật khẩu mới trước khi ghi vào file
                             df_cb.loc[idx, 'MatKhau'] = str(hash_password(new_pass.strip()))
                             df_cb.loc[idx, 'TrangThai'] = False
                             df_cb.to_excel(path_canbo, index=False)
@@ -250,6 +264,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("⚙️ TÙY CHỌN CHỨC NĂNG")
 
 list_options = [
+    "💵 Giao Dịch Tiền Mới",
     "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)", 
     "Báo Cáo Nộp Lĩnh NHNN (Ds_NopLinhNHNN)",
     "Báo Cáo Hoạt Động ATM (BC_atm)",
@@ -264,17 +279,29 @@ list_options = [
 if str(st.session_state.current_role).strip().upper() == "ADMIN":
     list_options.append("Quản Trị Hệ Thống (Reset Mật Khẩu NV)")
 
-report_type = st.sidebar.selectbox("Chọn loại báo cáo cần thực hiện:", tuple(list_options))
+report_type = st.sidebar.selectbox("Chọn loại báo cáo / chức năng cần thực hiện:", tuple(list_options))
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("📅 Thiết lập khoảng thời gian")
-start_prev = st.sidebar.date_input("Từ ngày (Kỳ trước)", value=default_kp_start)
-end_prev = st.sidebar.date_input("Đến ngày (Kỳ trước)", value=default_kp_end)
-start_curr = st.sidebar.date_input("Từ ngày (Kỳ này)", value=default_kc_start)
-end_curr = st.sidebar.date_input("Đến ngày (Kỳ này)", value=default_kc_end)
+if report_type != "💵 Giao Dịch Tiền Mới":
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Thiết lập khoảng thời gian")
+    start_prev = st.sidebar.date_input("Từ ngày (Kỳ trước)", value=default_kp_start)
+    end_prev = st.sidebar.date_input("Đến ngày (Kỳ trước)", value=default_kp_end)
+    start_curr = st.sidebar.date_input("Từ ngày (Kỳ này)", value=default_kc_start)
+    end_curr = st.sidebar.date_input("Đến ngày (Kỳ này)", value=default_kc_end)
 
 # ==================== XỬ LÝ MODULE BÁO CÁO TỔNG HỢP ====================
-if report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
+if report_type == "💵 Giao Dịch Tiền Mới":
+    if nhap_tien_moi:
+        nhap_tien_moi.show_nhap_tien_moi_page(
+            base_dir=BASE_DIR,
+            shared_data_dir=SHARED_DATA_DIR,
+            current_user=st.session_state.get('current_user', 'System'),
+            user_role=st.session_state.get('current_role', 'NV')
+        )
+    else:
+        st.error("❌ Không tìm thấy module `nhap_tien_moi.py` trong thư mục hệ thống.")
+
+elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
     st.subheader("📋 MODULE BÁO CÁO TỔNG HỢP TIẾP QUỸ & THU GOM")
     
     st.markdown(f"""
@@ -339,7 +366,6 @@ if report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
             st.markdown("---")
             st.subheader("📋 Bảng Tổng Hợp Kết Quả Tiếp Quỹ & Thu Gom")
             
-            # Định dạng số có dấu phẩy phân tách hàng nghìn khi hiển thị giao diện Web
             def format_numeric_df(input_df):
                 formatted_df = input_df.copy()
                 for col in formatted_df.columns:
@@ -450,6 +476,11 @@ elif report_type == "Quản Trị Hệ Thống (Reset Mật Khẩu NV)":
                 
                 submit_reset = st.form_submit_button("Xác nhận Reset Mật Khẩu", type="primary")
                 if submit_reset:
+                    if 'TrangThai' in df_cb.columns:
+                        df_cb['TrangThai'] = df_cb['TrangThai'].astype(bool)
+                    else:
+                        df_cb['TrangThai'] = False
+
                     idx = df_cb[df_cb['MaNV'].str.strip() == str(selected_nv).strip()].index
                     if not idx.empty:
                         df_cb.loc[idx, 'MatKhau'] = str(hash_password(new_default_pass.strip()))
