@@ -49,7 +49,7 @@ def render_kpi_time_filter():
 
 
 def export_kpi_to_excel(df_master):
-    """Xuất dữ liệu KPI Master ra file Excel định dạng chuyên nghiệp trực tiếp từ RAM."""
+    """Xuất dữ liệu KPI Master ra file Excel định dạng chuyên nghiệp trực tiếp từ RAM (Làm tròn đến hàng đơn vị, có phân cách hàng ngàn)."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_master.to_excel(writer, sheet_name='Báo cáo KPI Master', index=False)
@@ -61,7 +61,8 @@ def export_kpi_to_excel(df_master):
             'fg_color': '#1F4E78', 'font_color': 'white', 'border': 1
         })
         data_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
-        number_format = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'right', 'num_format': '#,##0.00'})
+        # Định dạng số nguyên có dấu phẩy phân cách hàng ngàn (#,##0)
+        number_format = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'right', 'num_format': '#,##0'})
         
         for col_num, column_title in enumerate(df_master.columns):
             worksheet.write(0, col_num, column_title, header_format)
@@ -284,7 +285,16 @@ def get_master_kpi_report(shared_data_dir, param_dir, start_date, end_date):
         'KD_MG_Lon', 'KD_MG_Nho', 'KD_NT_MG_Lon', 'KD_NT_MG_Nho', 'GDC_KiemDem',
         'SoBoTien_XL', 'GDC_XLTien', 'GDC_CongTac_DCN', 'GDC_Khac', 'TongCong'
     ]
-    return df_final[target_order].reset_index(drop=True)
+    
+    df_result = df_final[target_order].reset_index(drop=True)
+
+    # LÀM TRÒN SỐ ĐẾN HÀNG ĐƠN VỊ CHO TOÀN BỘ CÁC CỘT SỐ LIỆU
+    numeric_cols = df_result.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        if col != 'STT':
+            df_result[col] = df_result[col].round(0)
+
+    return df_result
 
 
 def show_kpi_report_page():
@@ -313,8 +323,17 @@ def show_kpi_report_page():
                 st.success(f"🎉 Hoàn tất tổng hợp KPI đồng bộ cho **{len(df_master)}** dòng nhân sự!")
 
     if st.session_state.df_master_result is not None:
-        df_display = st.session_state.df_master_result
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        df_display = st.session_state.df_master_result.copy()
+        
+        # ĐỊNH DẠNG HIỂN THỊ TRÊN GIAO DIỆN WEB: LÀM TRÒN HÀNG ĐƠN VỊ VÀ CÓ DẤU PHẨY PHÂN CÁCH HÀNG NGÀN
+        df_styled = df_display.copy()
+        for col in df_styled.columns:
+            if df_styled[col].dtype in ['float64', 'int64'] and col != 'STT':
+                df_styled[col] = df_styled[col].apply(
+                    lambda x: "{:,.0f}".format(x) if pd.notnull(x) else "0"
+                )
+
+        st.dataframe(df_styled, use_container_width=True, hide_index=True)
         
         try:
             excel_data = export_kpi_to_excel(df_display)
