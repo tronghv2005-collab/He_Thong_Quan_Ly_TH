@@ -237,7 +237,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 HỆ THỐNG QUẢN LÝ TT KHOA QUỸ")
+st.title("📊 HỆ THỐNG QUẢN LÝ TT KHO QUỸ")
 st.markdown("---")
 
 today = date.today()
@@ -301,8 +301,8 @@ if report_type == "💵 Giao Dịch Tiền Mới":
     else:
         st.error("❌ Không tìm thấy module `nhap_tien_moi.py` trong thư mục hệ thống.")
 
-elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
-    st.subheader("📋 MODULE BÁO CÁO TỔNG HỢP TIẾP QUỸ & THU GOM")
+elif report_type == "BÁO CÁO TỔNG HỢP (HOẠT ĐỘNG CÁC PHÒNG NGÂN QUỸ)":
+    st.subheader("📋 MODULE BÁO CÁO TỔNG HỢP HOẠT ĐÔNG CÁC PHÒNG NGÂN QUỸ")
     
     st.markdown(f"""
     <div style="background-color: #F5EFF2; padding: 12px 18px; border-radius: 10px; border: 1px solid #EEDCE3; margin-bottom: 20px;">
@@ -364,7 +364,7 @@ elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
                     st.stop()
 
             st.markdown("---")
-            st.subheader("📋 Bảng Tổng Hợp Kết Quả Tiếp Quỹ & Thu Gom")
+            st.subheader("📋 BẢNG TỔNG HỢP HOẠT ĐỘNG CÁC PHÒNG NGÂN QUỸ")
             
             def format_numeric_df(input_df):
                 formatted_df = input_df.copy()
