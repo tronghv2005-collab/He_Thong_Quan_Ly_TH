@@ -48,7 +48,7 @@ def _safe_float(val):
 
 def build_master_employee_pipeline(shared_data_dir, start_str, end_str):
     """
-    I - Tạo bảng Danh sách nhân viên tổng hợp từ CẢ FILE 1 (Ds_tiepquythugom) VÀ FILE 2 (Atm).
+    I - Tạo bảng Danh sách nhân viên tổng hợp từ CẢ FILE 1 (Ds_TiepQuyThuGom) VÀ FILE 2 (Atm).
     Bảo đảm không bị sót nhân sự mảng ATM.
     """
     f1_path = _find_file_by_keyword(shared_data_dir, "Ds_TiepQuyThuGom") or _find_file_by_keyword(shared_data_dir, "tiepquythugom")
@@ -176,8 +176,8 @@ def process_tiepquy_thugom_matrix_with_params(shared_data_dir, param_dir, start_
     """
     II - Tính KPI cho cán bộ. Tách bạch hoàn toàn GDC ĐCN và GDC TN, không gộp nhầm.
     """
-    f1_path = _find_file_by_keyword(shared_data_dir, "ds_tiepquythugom") or _find_file_by_keyword(shared_data_dir, "tiepquythugom")
-    f3_path = _find_file_by_keyword(param_dir, "thamso_km") or _find_file_by_keyword(shared_data_dir, "thamso_km")
+    f1_path = _find_file_by_keyword(shared_data_dir, "Ds_TiepQuyThuGom") or _find_file_by_keyword(shared_data_dir, "tiepquythugom")
+    f3_path = _find_file_by_keyword(param_dir, "Thamso_KM") or _find_file_by_keyword(shared_data_dir, "Thamso_KM")
     
     df1 = _read_flexible_file(f1_path)
     df3 = _read_flexible_file(f3_path)
