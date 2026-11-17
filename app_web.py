@@ -185,7 +185,6 @@ def check_login_system(base_dir):
                     try:
                         df_cb = pd.read_excel(path_canbo, dtype={'MaNV': str, 'MatKhau': str})
                         
-                        # Chuẩn hóa cột TrangThai thành bool để tránh lỗi dtype float64
                         if 'TrangThai' in df_cb.columns:
                             df_cb['TrangThai'] = df_cb['TrangThai'].astype(bool)
                         else:
@@ -301,8 +300,8 @@ if report_type == "💵 Giao Dịch Tiền Mới":
     else:
         st.error("❌ Không tìm thấy module `nhap_tien_moi.py` trong thư mục hệ thống.")
 
-elif report_type == "BÁO CÁO TỔNG HỢP (HOẠT ĐỘNG CÁC PHÒNG NGÂN QUỸ)":
-    st.subheader("📋 MODULE BÁO CÁO TỔNG HỢP HOẠT ĐÔNG CÁC PHÒNG NGÂN QUỸ")
+elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
+    st.subheader("📋 MODULE BÁO CÁO TỔNG HỢP HOẠT ĐỘNG CÁC PHÒNG NGÂN QUỸ")
     
     st.markdown(f"""
     <div style="background-color: #F5EFF2; padding: 12px 18px; border-radius: 10px; border: 1px solid #EEDCE3; margin-bottom: 20px;">
