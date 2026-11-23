@@ -406,33 +406,107 @@ elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
 
 elif report_type == "Báo Cáo Nộp Lĩnh NHNN (Ds_NopLinhNHNN)":
     st.subheader("🏦 MODULE: DANH SÁCH NỘP LĨNH NHNN")
-    thang_nam_nhnn = start_curr.strftime("%m%Y")
-    path_output_nhnn = os.path.join(OUTPUT_DIR, f"Bao_Cao_DS_NopLinh_NHNN_{thang_nam_nhnn}.xlsx")
+    ten_file_nhnn = f"Bao_Cao_DS_NopLinh_NHNN_{start_curr.strftime('%m%Y')}.xlsx"
+    path_output_nhnn = os.path.join(OUTPUT_DIR, ten_file_nhnn)
+
     if st.button("🚀 Chạy và Xem Báo Cáo NHNN", type="primary"):
         if BC_NHNN:
-            success = BC_NHNN.process_ds_nop_linh_nhnn_pipeline(SHARED_DATA_DIR, start_curr, end_curr, start_prev, end_prev, path_output_nhnn)
+            success = BC_NHNN.process_ds_nop_linh_nhnn_pipeline(
+                SHARED_DATA_DIR, start_curr, end_curr, start_prev, end_prev, path_output_nhnn
+            )
             if success and os.path.exists(path_output_nhnn):
                 st.success("🎉 Xử lý báo cáo NHNN thành công!")
-                st.dataframe(pd.read_excel(path_output_nhnn), use_container_width=True)
+                df_nhnn = pd.read_excel(path_output_nhnn)
 
+                # Dùng đúng phong cách lambda như Báo cáo Tổng hợp, loại trừ các cột chữ
+                text_cols_nhnn = ["LoaiNghiepVu", "CoSo", "LoaiDoiTuong", "Loại nghiệp vụ", "Cơ sở", "Loại điện"]
+                df_nhnn_display = df_nhnn.copy()
+                for col in df_nhnn_display.columns:
+                    if col not in text_cols_nhnn:
+                        df_nhnn_display[col] = df_nhnn_display[col].apply(
+                            lambda x: "{:,.0f}".format(float(x))
+                            if pd.notnull(x) and str(x).strip() != "" and pd.to_numeric(x, errors="coerce") == pd.to_numeric(x, errors="coerce")
+                            else x
+                        )
+
+                st.dataframe(df_nhnn_display, use_container_width=True)
+
+                with open(path_output_nhnn, "rb") as f_nhnn:
+                    st.download_button(
+                        label=f"📥 TẢI BÁO CÁO EXCEL ({ten_file_nhnn})",
+                        data=f_nhnn,
+                        file_name=ten_file_nhnn,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+        else:
+            st.error("❌ Không tìm thấy module `BC_NHNN.py`.")
 elif report_type == "Báo Cáo Hoạt Động ATM (BC_atm)":
     st.subheader("🏧 MODULE BÁO CÁO HOẠT ĐỘNG ATM & CRM")
     PATH_NHATKY = os.path.join(SHARED_DATA_DIR, "BC_nhatkygiaodich.xlsx")
     PATH_PARAM_ATM = os.path.join(BASE_DIR, "parameters", "Thamso_atm.xlsx")
-    path_output_atm = os.path.join(OUTPUT_DIR, f"BC_atm_{start_curr.strftime('%m%Y')}.xlsx")
+    ten_file_atm = f"BC_atm_{start_curr.strftime('%m%Y')}.xlsx"
+    path_output_atm = os.path.join(OUTPUT_DIR, ten_file_atm)
+
     if st.button("🚀 Chạy và Xuất Báo Cáo ATM", type="primary"):
         if BC_ATM:
-            df_res = BC_ATM.process_atm_summary_report(PATH_NHATKY, PATH_PARAM_ATM, start_curr, end_curr, start_prev, end_prev, path_output_atm)
-            if df_res is not None: st.dataframe(df_res, use_container_width=True)
+            df_res = BC_ATM.process_atm_summary_report(
+                PATH_NHATKY, PATH_PARAM_ATM, start_curr, end_curr, start_prev, end_prev, path_output_atm
+            )
+            if df_res is not None and not df_res.empty:
+                df_atm_display = df_res.copy()
+                for col in df_atm_display.columns:
+                    num_vals = pd.to_numeric(df_atm_display[col], errors="coerce")
+                    # Nếu cột có ít nhất một giá trị số hợp lệ thì làm tròn đến hàng đơn vị và ngăn cách dấu phẩy (,)
+                    if num_vals.notna().any():
+                        df_atm_display[col] = [
+                            "{:,.0f}".format(round(float(n))) if pd.notnull(n) else orig
+                            for orig, n in zip(df_atm_display[col], num_vals)
+                        ]
 
+                st.dataframe(df_atm_display, use_container_width=True)
+
+                if os.path.exists(path_output_atm):
+                    with open(path_output_atm, "rb") as f_atm:
+                        st.download_button(
+                            label=f"📥 TẢI BÁO CÁO EXCEL ({ten_file_atm})",
+                            data=f_atm,
+                            file_name=ten_file_atm,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+        else:
+            st.error("❌ Không tìm thấy module `BC_ATM.py`.")
 elif report_type == "Giao Dịch Phát Sinh Lớn (Ds_TiepQuyThuGom)":
     st.subheader("🔥 MODULE LỌC GIAO DỊCH PHÁT SINH LỚN")
     top_n = st.slider("Top N giao dịch:", 1, 50, 10)
+
+    def format_gdl_table(df_in):
+        if df_in is None or df_in.empty:
+            return pd.DataFrame()
+        df_fmt = df_in.copy()
+        for col in df_fmt.columns:
+            num_vals = pd.to_numeric(df_fmt[col], errors="coerce")
+            if num_vals.notna().any():
+                df_fmt[col] = [
+                    "{:,.0f}".format(round(float(n))) if pd.notnull(n) else orig
+                    for orig, n in zip(df_fmt[col], num_vals)
+                ]
+        return df_fmt
+
     if st.button("🚀 Chạy Lọc", type="primary"):
         if giao_dich_lon:
-            (vnd_c, usd_c), (vnd_p, usd_p) = giao_dich_lon.process_giao_dich_lon_report(SHARED_DATA_DIR, start_curr, end_curr, start_prev, end_prev, top_n)
-            st.dataframe(vnd_c, use_container_width=True)
+            (vnd_c, usd_c), (vnd_p, usd_p) = giao_dich_lon.process_giao_dich_lon_report(
+                SHARED_DATA_DIR, start_curr, end_curr, start_prev, end_prev, top_n
+            )
+            st.markdown("#### 💵 Kỳ này - VND")
+            st.dataframe(format_gdl_table(vnd_c), use_container_width=True)
 
+            if usd_c is not None and not usd_c.empty:
+                st.markdown("#### 💲 Kỳ này - Ngoại tệ / USD")
+                st.dataframe(format_gdl_table(usd_c), use_container_width=True)
+        else:
+            st.error("❌ Không tìm thấy module `giao_dich_lon.py`.")
 elif report_type == "Báo Cáo XNK Theo Loại Tiền & Đối Tác":
     st.subheader("💱 MODULE BÁO CÁO XUẤT NHẬP KHẨU")
     if st.button("🚀 Chạy XNK", type="primary"):
