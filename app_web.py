@@ -5,6 +5,8 @@ from datetime import datetime, date
 import calendar
 import os
 import hashlib
+import shutil
+import uuid
 
 # Import các module báo cáo
 try:
@@ -57,20 +59,33 @@ try:
 except ImportError:
     bc_word = None
 
-# Bổ sung module Giao Dịch Tiền Mới
 try:
     import nhap_tien_moi
 except ImportError:
     nhap_tien_moi = None
 
+
+# ==================== CẤU HÌNH UPLOAD CHO FILE DUNG LƯỢNG LỚN ====================
+def _configure_large_upload_limit(max_mb=512):
+    try:
+        current_limit = st.get_option("server.maxUploadSize")
+        if current_limit is None or current_limit < max_mb:
+            st.set_option("server.maxUploadSize", max_mb)
+    except Exception:
+        pass
+
+
+_configure_large_upload_limit(max_mb=512)
+
+
 # ==================== ĐỊNH NGHĨA THƯ MỤC DÙNG CHUNG ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_DATA_DIR = os.path.join(BASE_DIR, "data_source")
-UPLOAD_DATA_DIR = os.path.join(SHARED_DATA_DIR, "_uploaded_session")
+UPLOAD_ROOT_DIR = os.path.join(SHARED_DATA_DIR, "_uploaded_session")
 OUTPUT_DIR = os.path.join(BASE_DIR, "templates")
 
 os.makedirs(SHARED_DATA_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DATA_DIR, exist_ok=True)
+os.makedirs(UPLOAD_ROOT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Ánh xạ chính xác các file thuộc data_source theo từng chức năng/báo cáo
@@ -109,17 +124,39 @@ ALL_DATA_SOURCE_FILES = sorted(
 )
 
 
+def get_session_upload_dir():
+    if "upload_session_id" not in st.session_state:
+        st.session_state.upload_session_id = uuid.uuid4().hex[:12]
+    s_dir = os.path.join(UPLOAD_ROOT_DIR, st.session_state.upload_session_id)
+    os.makedirs(s_dir, exist_ok=True)
+    return s_dir
+
+
+def save_uploaded_stream(uploaded_file, dest_path):
+    """Ghi file tải lên theo từng khối (1MB) để tối ưu bộ nhớ với file > 150 MB."""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    uploaded_file.seek(0)
+    with open(dest_path, "wb") as f_out:
+        shutil.copyfileobj(uploaded_file, f_out, length=1024 * 1024)
+
+
 def get_data_file_path_with_source(filename, active_data_dir):
     """
     Trả về: (full_path, source_label)
-    - Nếu chọn 'Kéo lên từ máy' và file đã được kéo lên trong UPLOAD_DATA_DIR -> dùng file kéo lên ('Kéo từ máy').
-    - Nếu file chưa được kéo lên (hoặc chọn 'Thư mục HUB') -> tự động lấy từ thư mục HUB ('Thư mục HUB').
+    - Nếu chọn 'Kéo lên từ máy' và file tồn tại trong active_data_dir -> dùng file kéo lên ('Kéo từ máy').
+    - Nếu file chưa kéo lên (hoặc chọn 'Thư mục HUB') -> tự động lấy từ thư mục HUB ('Thư mục HUB').
     """
-    uploaded_path = os.path.join(UPLOAD_DATA_DIR, filename)
+    session_dir = get_session_upload_dir()
+    uploaded_path = os.path.join(session_dir, filename)
     hub_path = os.path.join(SHARED_DATA_DIR, filename)
 
-    if active_data_dir == UPLOAD_DATA_DIR and os.path.exists(uploaded_path):
-        return uploaded_path, "Kéo từ máy"
+    if active_data_dir != SHARED_DATA_DIR:
+        candidate = os.path.join(active_data_dir, filename)
+        if os.path.exists(candidate):
+            return candidate, "Kéo từ máy"
+        if os.path.exists(uploaded_path):
+            return uploaded_path, "Kéo từ máy"
+
     return hub_path, "Thư mục HUB"
 
 
@@ -132,17 +169,17 @@ def get_data_file_path(filename, active_data_dir):
 def build_effective_data_dir(required_files, active_data_dir):
     """
     Tạo thư mục phiên hiệu lực chứa đúng các file cần thiết cho báo cáo:
-    - Với file đã kéo lên trong UPLOAD_DATA_DIR: lấy bản kéo lên.
-    - Với file chưa kéo lên: tự động copy/liên kết từ thư mục HUB (SHARED_DATA_DIR) để các module
-      đọc đúng thư mục mà không thiếu file nào.
+    - File đã kéo lên trong phiên hiện tại: copy sang thư mục phiên hiệu lực.
+    - File chưa kéo lên: tự động copy từ thư mục HUB (SHARED_DATA_DIR) để các module
+      đọc cùng một thư mục mà không thiếu file nào.
     """
     if active_data_dir == SHARED_DATA_DIR or not required_files:
         return SHARED_DATA_DIR
 
-    effective_dir = os.path.join(UPLOAD_DATA_DIR, "_active_run")
+    session_dir = get_session_upload_dir()
+    effective_dir = os.path.join(session_dir, "_active_run")
     os.makedirs(effective_dir, exist_ok=True)
 
-    # Xóa file cũ trong _active_run để tránh tồn dư từ lần chạy trước
     for old_f in os.listdir(effective_dir):
         old_p = os.path.join(effective_dir, old_f)
         if os.path.isfile(old_p):
@@ -152,11 +189,13 @@ def build_effective_data_dir(required_files, active_data_dir):
                 pass
 
     for fname in required_files:
-        src_path, _ = get_data_file_path_with_source(fname, UPLOAD_DATA_DIR)
-        if os.path.exists(src_path):
-            dst_path = os.path.join(effective_dir, fname)
-            with open(src_path, "rb") as f_src, open(dst_path, "wb") as f_dst:
-                f_dst.write(f_src.read())
+        up_file_p = os.path.join(session_dir, fname)
+        hub_file_p = os.path.join(SHARED_DATA_DIR, fname)
+        src_p = up_file_p if os.path.exists(up_file_p) else hub_file_p
+        if os.path.exists(src_p):
+            dst_p = os.path.join(effective_dir, fname)
+            with open(src_p, "rb") as f_src, open(dst_p, "wb") as f_dst:
+                shutil.copyfileobj(f_src, f_dst, length=1024 * 1024)
 
     return effective_dir
 
@@ -173,6 +212,8 @@ def render_data_source_selector(required_files, report_label=""):
 
     if not required_files:
         return "Thư mục HUB", SHARED_DATA_DIR
+
+    session_dir = get_session_upload_dir()
 
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📂 Nguồn dữ liệu: {report_label}")
@@ -191,8 +232,7 @@ def render_data_source_selector(required_files, report_label=""):
         st.sidebar.markdown("<br>".join(lines), unsafe_allow_html=True)
         return "Thư mục HUB", SHARED_DATA_DIR
 
-    # Chế độ: Kéo lên từ máy (chỉ hiển thị đúng các file của chức năng hiện tại)
-    st.sidebar.caption("Kéo thả file cần cập nhật (file chưa kéo lên sẽ tự lấy từ HUB):")
+    st.sidebar.caption("Kéo thả nhiều file Excel cần cập nhật (file chưa kéo lên sẽ tự lấy từ HUB):")
     uploaded_files = st.sidebar.file_uploader(
         "Kéo thả file Excel vào đây:",
         type=["xlsx", "xls", "xlsm"],
@@ -209,9 +249,8 @@ def render_data_source_selector(required_files, report_label=""):
             up_lower = up_file.name.strip().lower()
             if up_lower in allowed_lower:
                 std_name = allowed_lower[up_lower]
-                save_path = os.path.join(UPLOAD_DATA_DIR, std_name)
-                with open(save_path, "wb") as f_out:
-                    f_out.write(up_file.getbuffer())
+                save_path = os.path.join(session_dir, std_name)
+                save_uploaded_stream(up_file, save_path)
                 saved_names.append(std_name)
             else:
                 skipped_names.append(up_file.name)
@@ -221,17 +260,19 @@ def render_data_source_selector(required_files, report_label=""):
         if skipped_names:
             st.sidebar.warning(f"Bỏ qua file không thuộc báo cáo này: {', '.join(skipped_names)}")
 
-    # Hiển thị nguồn thực tế của từng file trong chức năng hiện tại
     status_lines = []
     for fname in required_files:
-        _, src_label = get_data_file_path_with_source(fname, UPLOAD_DATA_DIR)
-        icon = "📤" if src_label == "Kéo từ máy" else "🏢"
-        status_lines.append(f"{icon} `{fname}` → **{src_label}**")
+        up_p = os.path.join(session_dir, fname)
+        if os.path.exists(up_p):
+            sz_mb = os.path.getsize(up_p) / (1024 * 1024)
+            status_lines.append(f"📤 `{fname}` → **Kéo từ máy** ({sz_mb:.1f} MB)")
+        else:
+            status_lines.append(f"🏢 `{fname}` → **Thư mục HUB**")
     st.sidebar.markdown("<br>".join(status_lines), unsafe_allow_html=True)
 
     if st.sidebar.button("↩️ Xóa file kéo lên (Dùng HUB)", key=f"btn_clear_up_{report_label}", use_container_width=True):
         for fname in required_files:
-            up_p = os.path.join(UPLOAD_DATA_DIR, fname)
+            up_p = os.path.join(session_dir, fname)
             if os.path.exists(up_p):
                 try:
                     os.remove(up_p)
@@ -239,8 +280,19 @@ def render_data_source_selector(required_files, report_label=""):
                     pass
         st.rerun()
 
-    effective_dir = build_effective_data_dir(required_files, UPLOAD_DATA_DIR)
+    effective_dir = build_effective_data_dir(required_files, session_dir)
     return "Kéo lên từ máy (thiếu tự lấy HUB)", effective_dir
+
+
+def render_source_file_diagnostics(file_paths_dict):
+    """Hiển thị thông tin đường dẫn, nguồn, dung lượng và thời gian cập nhật thực tế của các file nguồn."""
+    for label, fpath in file_paths_dict.items():
+        if os.path.exists(fpath):
+            sz_mb = os.path.getsize(fpath) / (1024 * 1024)
+            mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d %H:%M:%S")
+            st.write(f"📁 **{label}**: `{fpath}` | Dung lượng: **{sz_mb:.2f} MB** | Cập nhật: **{mtime}**")
+        else:
+            st.warning(f"⚠️ Không tìm thấy **{label}** tại: `{fpath}`")
 
 
 def format_thousands_table(df_in, round_unit=True):
@@ -288,7 +340,7 @@ def check_login_system(base_dir):
             df_init_cb['MatKhau'] = df_init_cb['MatKhau'].astype(str)
             df_init_cb['TrangThai'] = df_init_cb['TrangThai'].astype(bool)
             df_init_cb.to_excel(path_canbo, index=False)
-        except:
+        except Exception:
             pass
 
     if 'logged_in' not in st.session_state:
@@ -506,7 +558,7 @@ elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
 
     st.markdown(f"""
     <div style="background-color: #F5EFF2; padding: 12px 18px; border-radius: 10px; border: 1px solid #EEDCE3; margin-bottom: 20px;">
-        <h4 style="margin: 0 0 8px 0; color: #4A3B45;">📅 KỲ BÁO CÁO ĐỐI CHÍNH</h4>
+        <h4 style="margin: 0 0 8px 0; color: #4A3B45;">📅 KỲ BÁO CÁO ĐỐI CHIẾU</h4>
         • <b>Kỳ trước:</b> Từ ngày {start_prev.strftime('%d/%m/%Y')} đến {end_prev.strftime('%d/%m/%Y')}<br>
         • <b>Kỳ báo cáo:</b> Từ ngày {start_curr.strftime('%d/%m/%Y')} đến {end_curr.strftime('%d/%m/%Y')}<br>
         • <b>Nguồn dữ liệu:</b> {data_mode}
@@ -518,7 +570,7 @@ elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
     PATH_PARAM_KM = os.path.join(BASE_DIR, "parameters", "Thamso_KM.xlsx")
     PATH_TEMPLATE = os.path.join(BASE_DIR, "templates", "Template_BaoCao1.xlsx")
 
-    st.info("ℹ️ **Lưu ý:** Quá trình xử lý dữ liệu lớn có thể mất từ vài giây đến vài phút. Hệ thống sẽ tự động thông báo tiến trình.")
+    st.info("ℹ️ **Lưu ý:** Quá trình xử lý file dữ liệu lớn (như `Ds_TiepQuyThuGom.xlsx` > 150 MB) có thể mất từ vài giây đến vài phút. Hệ thống sẽ tự động thông báo tiến trình.")
 
     if st.button("⚡ Chạy và Xem Báo Cáo Tổng Hợp", type="primary"):
         if bc is None:
@@ -526,7 +578,12 @@ elif report_type == "Báo Cáo Tổng Hợp (Tiếp Quỹ & Thu Gom)":
         else:
             with st.status("⏳ Đang xử lý dữ liệu hệ thống...", expanded=True) as status:
                 try:
-                    st.write("📂 Đang đọc và làm sạch dữ liệu nguồn...")
+                    st.write("📂 Đang kiểm tra nguồn và đọc dữ liệu...")
+                    render_source_file_diagnostics({
+                        "File 1 (Ds_TiepQuyThuGom.xlsx)": PATH_FILE1,
+                        "File 2 (Ds_Noplinhkhac.xlsx)": PATH_FILE2,
+                    })
+
                     df1 = bc.clean_and_prepare_file1(PATH_FILE1) if os.path.exists(PATH_FILE1) else pd.DataFrame()
                     df2 = bc.clean_and_prepare_file2(PATH_FILE2) if os.path.exists(PATH_FILE2) else pd.DataFrame()
                     df_all = pd.concat([df1, df2], ignore_index=True)
@@ -599,9 +656,11 @@ elif report_type == "Báo Cáo Nộp Lĩnh NHNN (Ds_NopLinhNHNN)":
     st.subheader("🏦 MODULE: DANH SÁCH NỘP LĨNH NHNN")
     ten_file_nhnn = f"Bao_Cao_DS_NopLinh_NHNN_{start_curr.strftime('%m%Y')}.xlsx"
     path_output_nhnn = os.path.join(OUTPUT_DIR, ten_file_nhnn)
+    path_in_nhnn = get_data_file_path("Ds_NopLinhNHNN.xlsx", active_data_dir)
 
     if st.button("🚀 Chạy và Xem Báo Cáo NHNN", type="primary"):
         if BC_NHNN:
+            render_source_file_diagnostics({"Ds_NopLinhNHNN.xlsx": path_in_nhnn})
             success = BC_NHNN.process_ds_nop_linh_nhnn_pipeline(
                 active_data_dir, start_curr, end_curr, start_prev, end_prev, path_output_nhnn
             )
@@ -630,6 +689,7 @@ elif report_type == "Báo Cáo Hoạt Động ATM (BC_atm)":
 
     if st.button("🚀 Chạy và Xuất Báo Cáo ATM", type="primary"):
         if BC_ATM:
+            render_source_file_diagnostics({"BC_nhatkygiaodich.xlsx": PATH_NHATKY})
             df_res = BC_ATM.process_atm_summary_report(
                 PATH_NHATKY, PATH_PARAM_ATM, start_curr, end_curr, start_prev, end_prev, path_output_atm
             )
@@ -651,9 +711,11 @@ elif report_type == "Báo Cáo Hoạt Động ATM (BC_atm)":
 elif report_type == "Giao Dịch Phát Sinh Lớn (Ds_TiepQuyThuGom)":
     st.subheader("🔥 MODULE LỌC GIAO DỊCH PHÁT SINH LỚN")
     top_n = st.slider("Top N giao dịch:", 1, 50, 10)
+    path_in_gdl = get_data_file_path("Ds_TiepQuyThuGom.xlsx", active_data_dir)
 
     if st.button("🚀 Chạy Lọc", type="primary"):
         if giao_dich_lon:
+            render_source_file_diagnostics({"Ds_TiepQuyThuGom.xlsx": path_in_gdl})
             (vnd_c, usd_c), (vnd_p, usd_p) = giao_dich_lon.process_giao_dich_lon_report(
                 active_data_dir, start_curr, end_curr, start_prev, end_prev, top_n
             )
@@ -668,8 +730,11 @@ elif report_type == "Giao Dịch Phát Sinh Lớn (Ds_TiepQuyThuGom)":
 
 elif report_type == "Báo Cáo XNK Theo Loại Tiền & Đối Tác":
     st.subheader("💱 MODULE BÁO CÁO XUẤT NHẬP KHẨU")
+    path_in_xnk = get_data_file_path("xnk_2026.xlsx", active_data_dir)
+
     if st.button("🚀 Chạy XNK", type="primary"):
         if bc_xnk:
+            render_source_file_diagnostics({"xnk_2026.xlsx": path_in_xnk})
             curr, prev, diff, out = bc_xnk.xu_ly_bao_cao_xnk_pipeline(
                 active_data_dir, OUTPUT_DIR, start_curr, end_curr, start_prev, end_prev
             )
