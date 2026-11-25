@@ -1,9 +1,14 @@
 import pandas as pd
 import numpy as np
 from openpyxl import load_workbook
+from openpyxl.styles import Font, Alignment, PatternFill
+from openpyxl.utils import get_column_letter
 import openpyxl
-import os, re, uuid
+import os
+import re
+import uuid
 from pathlib import Path
+
 
 def no_accent_vietnamese(s):
     s = str(s).lower()
@@ -16,6 +21,7 @@ def no_accent_vietnamese(s):
     s = re.sub(r'[đ]', 'd', s)
     return re.sub(r'\s+', '', s)
 
+
 def process_flat_header(file_path):
     try:
         df = pd.read_excel(file_path, header=[0, 1])
@@ -24,7 +30,7 @@ def process_flat_header(file_path):
 
     new_columns = []
     current_currency = "VND"
-    
+
     for col in df.columns:
         try:
             if isinstance(col, tuple):
@@ -33,23 +39,23 @@ def process_flat_header(file_path):
             else:
                 c1 = str(col).strip()
                 c2 = ""
-            
+
             c1_upper = c1.upper()
             if any(curr in c1_upper for curr in ['VND', 'USD', 'EUR', 'JPY']):
                 for curr in ['VND', 'USD', 'EUR', 'JPY']:
                     if curr in c1_upper:
                         current_currency = curr
                         break
-            elif "Unnamed" not in c1 and c1 != "" and "nan" not in c1.lower(): 
+            elif "Unnamed" not in c1 and c1 != "" and "nan" not in c1.lower():
                 current_currency = c1.upper().strip()
-                
+
             clean1, clean2 = no_accent_vietnamese(c1), no_accent_vietnamese(c2)
-            c_combined = (clean1 + "_" + clean2)
-            
+            c_combined = clean1 + "_" + clean2
+
             if "sodien" in c_combined or "so_dien" in c_combined:
                 new_columns.append(f"IGNORE_COL_{len(new_columns)}")
                 continue
-                
+
             if "ngayhieuluc" in c_combined or ("ngay" in c_combined and "luc" in c_combined) or "ngay" in clean2:
                 new_columns.append("NgayHieuLuc")
             elif "loainghiepvu" in c_combined or "nghiepvu" in c_combined or "nghiep" in clean2:
@@ -66,10 +72,10 @@ def process_flat_header(file_path):
                 new_columns.append("CoSo")
             elif "diadiem" in c_combined or "noplinh" in c_combined:
                 new_columns.append("DiaDiemNopLinh")
-            elif "thanh tien" in c2.lower() or "thanhtien" in clean1 or "thanhtien" in clean2: 
+            elif "thanh tien" in c2.lower() or "thanhtien" in clean1 or "thanhtien" in clean2:
                 matched_cc = next((cc for cc in ['VND', 'USD', 'EUR', 'JPY'] if cc in current_currency or cc in c1.upper()), "VND")
                 new_columns.append(f"{matched_cc}_ThanhTien")
-            else: 
+            else:
                 denom_clean = re.sub(r'[.,\s]', '', c2)
                 if denom_clean.isdigit():
                     new_columns.append(f"{current_currency}_{denom_clean}")
@@ -80,7 +86,7 @@ def process_flat_header(file_path):
                         new_columns.append(f"{current_currency}_{c2}")
         except Exception:
             new_columns.append(f"Col_{len(new_columns)}")
-                    
+
     counts = {}
     final_cols = []
     for c in new_columns:
@@ -89,73 +95,83 @@ def process_flat_header(file_path):
     df.columns = final_cols
     return df
 
+
 def clean_and_prepare_file1(file_path):
-    if not os.path.exists(file_path): return pd.DataFrame()
+    if not os.path.exists(file_path):
+        return pd.DataFrame()
     df = process_flat_header(file_path)
     str_cols = ['NgayHieuLuc', 'LoaiNghiepVu', 'ThuQuy', 'LaiXe', 'TuyenTiepQuy', 'KhachHang', 'CoSo']
     for col in str_cols:
-        if col in df.columns: df[col] = df[col].astype(str).str.strip()
-    if 'NgayHieuLuc' in df.columns: df['NgayHieuLuc'] = pd.to_datetime(df['NgayHieuLuc'], errors='coerce')
-    
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+    if 'NgayHieuLuc' in df.columns:
+        df['NgayHieuLuc'] = pd.to_datetime(df['NgayHieuLuc'], errors='coerce')
+
     if 'CoSo' in df.columns:
         df['CoSo'] = df['CoSo'].apply(lambda x: "Hub NVC" if "hub" in str(x).lower() and "nvc" in str(x).lower() else str(x).strip())
     if 'KhachHang' in df.columns:
         df['LoaiDoiTuong'] = df['KhachHang'].apply(lambda x: "Chi nhánh" if str(x)[:3] == "000" else "Phòng giao dịch")
-    
+
     df['Is_Count_Turn'] = 1
     return _finalize_file_data(df, is_file2=False)
 
+
 def clean_and_prepare_file2(file_path):
-    if not os.path.exists(file_path): return pd.DataFrame()
+    if not os.path.exists(file_path):
+        return pd.DataFrame()
     df = process_flat_header(file_path)
-    
+
     info_fields = ['LoaiNghiepVu', 'DiaDiemNopLinh', 'TuyenTiepQuy', 'KhachHang', 'CoSo']
     for f in info_fields:
-        if f in df.columns: df[f] = df[f].astype(str).str.strip()
-    if 'NgayHieuLuc' in df.columns: df['NgayHieuLuc'] = pd.to_datetime(df['NgayHieuLuc'], errors='coerce')
-    
+        if f in df.columns:
+            df[f] = df[f].astype(str).str.strip()
+    if 'NgayHieuLuc' in df.columns:
+        df['NgayHieuLuc'] = pd.to_datetime(df['NgayHieuLuc'], errors='coerce')
+
     if 'CoSo' in df.columns:
         df['CoSo'] = df['CoSo'].apply(lambda x: "Hub NVC" if "hub" in str(x).lower() and "nvc" in str(x).lower() else str(x).strip())
-        
+
     if 'LoaiNghiepVu' in df.columns:
         records_to_add = []
         for idx, row in df.iterrows():
             nv = str(row.get('LoaiNghiepVu', '')).strip()
             nv_clean = " ".join(nv.lower().split())
             dc = str(row.get('DiaDiemNopLinh', '')).strip()
-            
+
             if nv_clean in ["thu tiền ( thu hộ kh(có tk)", "thu tiền (thu hộ khác)", "chi tiền(chi hộ khác)", "chi tiền (chi hộ kh (co tk)"]:
                 continue
-                
+
             if "cơ sở khác" in nv_clean or "co so khac" in nv_clean:
                 r_chi = row.copy()
                 r_chi['LoaiNghiepVu'] = 'Chi tiền cơ sở khác'
                 cs_val = str(r_chi.get('CoSo', '')).strip()
-                if cs_val and cs_val.lower() != 'nan': r_chi['CoSo'] = cs_val
+                if cs_val and cs_val.lower() != 'nan':
+                    r_chi['CoSo'] = cs_val
                 r_chi['Is_Count_Turn'] = 1
                 records_to_add.append(r_chi)
-                
+
                 r_thu = row.copy()
                 r_thu['LoaiNghiepVu'] = 'Thu tiền cơ sở khác'
                 kh_val = str(r_thu.get('KhachHang', '')).strip()
-                if kh_val and kh_val.lower() != 'nan': r_thu['CoSo'] = kh_val
+                if kh_val and kh_val.lower() != 'nan':
+                    r_thu['CoSo'] = kh_val
                 r_thu['Is_Count_Turn'] = 1
                 records_to_add.append(r_thu)
-                
+
             elif "thu tiền" in nv_clean and ("thu hộ" in nv_clean or "thu hộ kh" in nv_clean):
                 row['LoaiNghiepVu'] = 'Thu hộ KH tại địa chỉ'
                 row['Is_Count_Turn'] = 1
                 records_to_add.append(row)
-            elif "chi tiền" in nv_clean and ("chi hộ" in nv_clean or "chi hộ kh" in nv_clean) :
-                row['LoaiNghiepVu'] = 'Chi hộ KH tại địa chỉ' 
+            elif "chi tiền" in nv_clean and ("chi hộ" in nv_clean or "chi hộ kh" in nv_clean):
+                row['LoaiNghiepVu'] = 'Chi hộ KH tại địa chỉ'
                 row['Is_Count_Turn'] = 1
-                records_to_add.append(row) 
+                records_to_add.append(row)
             elif "tctd nop tien" in nv_clean or "tctd nộp tiền" in nv.lower():
                 r_root = row.copy()
                 r_root['LoaiNghiepVu'] = 'Thu tiền (TCTD Nộp tiền)'
                 r_root['Is_Count_Turn'] = 1
                 records_to_add.append(r_root)
-                
+
                 r_child = row.copy()
                 r_child['LoaiNghiepVu'] = 'TCTD nộp' if dc == 'Tại trung tâm' else 'Thu quỹ TCTD'
                 r_child['Is_Count_Turn'] = 1
@@ -166,7 +182,7 @@ def clean_and_prepare_file2(file_path):
                 r_root['LoaiNghiepVu'] = 'Chi tiền (TCTD Lĩnh tiền)'
                 r_root['Is_Count_Turn'] = 1
                 records_to_add.append(r_root)
-                
+
                 r_child = row.copy()
                 r_child['LoaiNghiepVu'] = 'TCTD lĩnh' if dc == 'Tại trung tâm' else 'Tiếp quỹ'
                 r_child['Is_Count_Turn'] = 1
@@ -175,19 +191,23 @@ def clean_and_prepare_file2(file_path):
             else:
                 row['Is_Count_Turn'] = 1
                 records_to_add.append(row)
-                
+
         df = pd.DataFrame(records_to_add)
-            
+
     df['LoaiDoiTuong'] = "Toàn bộ"
     return _finalize_file_data(df, is_file2=True)
 
+
 def _finalize_file_data(df, is_file2=False):
-    if df.empty: return df
+    if df.empty:
+        return df
     str_cols = ['NgayHieuLuc', 'LoaiNghiepVu', 'KhachHang', 'CoSo']
     for col in str_cols:
-        if col in df.columns: df[col] = df[col].astype(str).str.strip()
-    if 'NgayHieuLuc' in df.columns: df['NgayHieuLuc'] = pd.to_datetime(df['NgayHieuLuc'], errors='coerce')
-        
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+    if 'NgayHieuLuc' in df.columns:
+        df['NgayHieuLuc'] = pd.to_datetime(df['NgayHieuLuc'], errors='coerce')
+
     if 'KhachHang' in df.columns and not is_file2:
         df['LoaiDoiTuong'] = df['KhachHang'].apply(lambda x: "Chi nhánh" if str(x)[:3] == "000" else "Phòng giao dịch")
     else:
@@ -196,14 +216,14 @@ def _finalize_file_data(df, is_file2=False):
     cac_tien_chinh = ['VND', 'USD', 'EUR', 'JPY']
     main_money_cols = {cc: [] for cc in cac_tien_chinh}
     all_numeric_money_cols = []
-    
+
     for col in df.columns:
         if "_" in col and "IGNORE_COL" not in col and not any(k in col for k in ['NgayHieuLuc', 'LoaiNghiepVu', 'ThuQuy', 'LaiXe', 'TuyenTiepQuy', 'KhachHang', 'CoSo', 'Chuyen_Key', 'LoaiDoiTuong', 'DiaDiemNopLinh', 'Is_Count_Turn', 'Is_Child_Tag']):
             parts = col.split("_")
             if len(parts) >= 2:
                 prefix = str(parts[0]).upper().strip()
                 suffix = str(parts[-1]).split(".")[0].lower().strip()
-                
+
                 if "thanhtien" not in suffix and suffix.isdigit():
                     all_numeric_money_cols.append(col)
                     matched_cc = next((cc for cc in cac_tien_chinh if cc in prefix), None)
@@ -221,7 +241,7 @@ def _finalize_file_data(df, is_file2=False):
     df['To_Sum_Khac'] = df[khac_cols].fillna(0).apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if khac_cols else 0
 
     date_str = df['NgayHieuLuc'].dt.strftime('%Y-%m-%d') if not df['NgayHieuLuc'].isna().all() else ''
-    
+
     if is_file2:
         is_ho = df['LoaiNghiepVu'].isin(['Thu hộ KH tại địa chỉ', 'Chi hộ KH tại địa chỉ'])
         base_uuid = [str(uuid.uuid4()) for _ in range(len(df))]
@@ -232,10 +252,12 @@ def _finalize_file_data(df, is_file2=False):
         df['Chuyen_Key'] = np.where(is_tn, date_str + "_" + df.get('TuyenTiepQuy', ''), date_str + "_" + df['LoaiNghiepVu'] + "_" + df.get('ThuQuy', '') + "_" + df.get('LaiXe', ''))
     return df
 
+
 def aggregate_center_summary(df_period):
-    if df_period.empty: return pd.DataFrame()
+    if df_period.empty:
+        return pd.DataFrame()
     agg_d = {
-        'Tinh_Luot': 'sum', 'Tinh_Phong': 'sum', 
+        'Tinh_Luot': 'sum', 'Tinh_Phong': 'sum',
         'To_Sum_VND': 'sum', 'VND_ThanhTien_Raw': 'sum',
         'To_Sum_USD': 'sum', 'USD_ThanhTien_Raw': 'sum',
         'To_Sum_EUR': 'sum', 'EUR_ThanhTien_Raw': 'sum',
@@ -252,7 +274,7 @@ def aggregate_center_summary(df_period):
         df_grouped['JPY_ThanhTien'] = df_grouped['JPY_ThanhTien_Raw']
         return df_grouped
 
-    thu_filters = ['Thu gom cuối ngày', 'Thu gom trong ngày', 'CN Nộp tiền', 'Thu tiền (CN Nộp tiền)' ]
+    thu_filters = ['Thu gom cuối ngày', 'Thu gom trong ngày', 'CN Nộp tiền', 'Thu tiền (CN Nộp tiền)']
     chi_filters = ['Tiếp quỹ đầu ngày', 'Tiếp quỹ trong ngày', 'CN Lĩnh tiền', 'Chi tiền (CN Lĩnh tiền)']
     thu_nb_filters = ['Thu gom cuối ngày', 'Thu gom trong ngày', 'CN Nộp tiền', 'Thu tiền (CN Nộp tiền)', 'Thu tiền cơ sở khác']
     chi_nb_filters = ['Tiếp quỹ đầu ngày', 'Tiếp quỹ trong ngày', 'CN Lĩnh tiền', 'Chi tiền (CN Lĩnh tiền)', 'Chi tiền cơ sở khác']
@@ -263,7 +285,7 @@ def aggregate_center_summary(df_period):
     for cs in coso_list:
         df_cs = df_period[df_period['CoSo'] == cs]
         df_cs_nv = df_cs.groupby(['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'], as_index=False).agg(agg_d)
-          
+
         df_cs_thu = df_cs[df_cs['LoaiNghiepVu'].isin(thu_filters)]
         if not df_cs_thu.empty:
             s_thu = df_cs_thu.agg(agg_d).to_dict()
@@ -299,7 +321,8 @@ def aggregate_center_summary(df_period):
         list_per_coso.append(df_cs_nv)
 
     df_all_coso = pd.concat(list_per_coso, ignore_index=True) if list_per_coso else pd.DataFrame()
-    if not df_all_coso.empty: df_all_coso = process_division(df_all_coso)
+    if not df_all_coso.empty:
+        df_all_coso = process_division(df_all_coso)
 
     center_rows = []
     df_center_thu = df_period[df_period['LoaiNghiepVu'].isin(thu_filters)]
@@ -335,41 +358,44 @@ def aggregate_center_summary(df_period):
         center_rows.append(s_cchinb)
 
     df_center_final = pd.DataFrame(center_rows) if center_rows else pd.DataFrame(columns=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
-    if not df_center_final.empty: df_center_final = process_division(df_center_final)
+    if not df_center_final.empty:
+        df_center_final = process_division(df_center_final)
 
     return pd.concat([df_all_coso, df_center_final], ignore_index=True)
+
 
 def aggregate_period(df_all, start_date, end_date, df_param_km):
     df_all['Clean_Date'] = pd.to_datetime(df_all['NgayHieuLuc']).dt.normalize()
     s_date = pd.to_datetime(start_date).normalize()
     e_date = pd.to_datetime(end_date).normalize()
-    
+
     df_period = df_all[(df_all['Clean_Date'] >= s_date) & (df_all['Clean_Date'] <= e_date)].copy()
-    if df_period.empty: return pd.DataFrame(columns=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
-    
+    if df_period.empty:
+        return pd.DataFrame(columns=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
+
     df_param = df_param_km.copy()
     df_param.columns = [no_accent_vietnamese(c) for c in df_param.columns]
     p_cols = {c: 'KhachHang' for c in df_param.columns if c in ['khachhang', 'tenkhachhang']}
     p_cols.update({c: 'KM_PGD' for c in df_param.columns if 'kmpgd' in c})
     p_cols.update({c: 'KM_Tuyen' for c in df_param.columns if 'kmtuyen' in c})
     df_param = df_param.rename(columns=p_cols)[['KhachHang', 'KM_PGD', 'KM_Tuyen']].drop_duplicates(subset=['KhachHang']).copy()
-    
+
     df_param['Join_Key'] = df_param['KhachHang'].astype(str).apply(no_accent_vietnamese)
     df_period['Join_Key'] = df_period['KhachHang'].astype(str).apply(no_accent_vietnamese)
-    
+
     df_period = pd.merge(df_period, df_param, on='Join_Key', how='left')
     df_period['KM_PGD'] = pd.to_numeric(df_period['KM_PGD'], errors='coerce').fillna(0)
     df_period['KM_Tuyen'] = pd.to_numeric(df_period['KM_Tuyen'], errors='coerce').fillna(0)
-    
+
     df_period['Is_First'] = ~df_period['Chuyen_Key'].duplicated()
     df_period['Tinh_Luot'] = np.where((df_period['Is_First']) & (df_period.get('Is_Count_Turn', 1) == 1), 1, 0)
-    
+
     df_period['Tinh_KM_Tuyen'] = np.where((df_period['Is_First']) & (df_period['LoaiNghiepVu'].isin(['Tiếp quỹ đầu ngày', 'Thu gom cuối ngày', 'Thu hộ KH tại địa chỉ', 'Chi hộ KH tại địa chỉ'])), df_period['KM_Tuyen'], 0)
     df_period['Tinh_KM_Phong'] = df_period['KM_PGD']
     df_period['Tinh_Phong'] = 1
 
-    agg_d = {'Tinh_Luot':'sum','Tinh_Phong':'sum','To_Sum_VND':'sum','VND_ThanhTien_Raw':'sum','To_Sum_USD':'sum','USD_ThanhTien_Raw':'sum','To_Sum_EUR':'sum','EUR_ThanhTien_Raw':'sum','To_Sum_JPY':'sum','JPY_ThanhTien_Raw':'sum','To_Sum_Khac':'sum','Tinh_KM_Tuyen':'sum','Tinh_KM_Phong':'sum'}
-    
+    agg_d = {'Tinh_Luot': 'sum', 'Tinh_Phong': 'sum', 'To_Sum_VND': 'sum', 'VND_ThanhTien_Raw': 'sum', 'To_Sum_USD': 'sum', 'USD_ThanhTien_Raw': 'sum', 'To_Sum_EUR': 'sum', 'EUR_ThanhTien_Raw': 'sum', 'To_Sum_JPY': 'sum', 'JPY_ThanhTien_Raw': 'sum', 'To_Sum_Khac': 'sum', 'Tinh_KM_Tuyen': 'sum', 'Tinh_KM_Phong': 'sum'}
+
     def process_division(df_grouped):
         for cc in ['VND', 'USD', 'EUR', 'JPY', 'Khac']:
             df_grouped[f'Bo_{cc}'] = (df_grouped[f'To_Sum_{cc}'] / 1000).round(2)
@@ -379,34 +405,35 @@ def aggregate_period(df_all, start_date, end_date, df_param_km):
         df_grouped['JPY_ThanhTien'] = df_grouped['JPY_ThanhTien_Raw']
         return df_grouped
 
-    sd = df_period.groupby(['LoaiNghiepVu','CoSo','LoaiDoiTuong'], as_index=False).agg(agg_d)
+    sd = df_period.groupby(['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'], as_index=False).agg(agg_d)
     sd = process_division(sd)
-    
+
     file1_nv = ['Tiếp quỹ đầu ngày', 'Thu gom cuối ngày', 'Tiếp quỹ trong ngày', 'Thu gom trong ngày']
     df_f1_records = df_period[df_period['LoaiNghiepVu'].isin(file1_nv)].copy()
     if not df_f1_records.empty:
-        st = df_f1_records.groupby(['LoaiNghiepVu','CoSo'], as_index=False).agg(agg_d)
+        st = df_f1_records.groupby(['LoaiNghiepVu', 'CoSo'], as_index=False).agg(agg_d)
         st['LoaiDoiTuong'] = "Toàn bộ"
         st = process_division(st)
         sd = pd.concat([sd, st], ignore_index=True).drop_duplicates(subset=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
-        
+
     df_center = aggregate_center_summary(df_period)
     final_combined = pd.concat([sd, df_center], ignore_index=True)
     return final_combined.drop_duplicates(subset=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
 
+
 def format_summary_dataframe(df_prev, df_curr, all_nghiep_vu, all_coso):
     rows = []
     file1_nv = ['Tiếp quỹ đầu ngày', 'Thu gom cuối ngày', 'Tiếp quỹ trong ngày', 'Thu gom trong ngày']
-    
+
     desired_nv_order = [
         'Tiếp quỹ đầu ngày', 'Tiếp quỹ trong ngày', 'Thu gom trong ngày', 'Thu gom cuối ngày',
         'Thu hộ KH tại địa chỉ', 'Chi hộ KH tại địa chỉ', 'Thu khách hàng khác', 'Chi khách hàng khác',
         'Thu tiền (TCTD Nộp tiền)', 'Thu quỹ TCTD', 'TCTD nộp', 'Chi tiền (TCTD Lĩnh tiền)', 'Tiếp quỹ', 'TCTD lĩnh',
-        'Chi nhánh nộp tiền', 'Chi nhánh lĩnh', 'Chi tiền (chi nhánh lĩnh tiền)', 
+        'Chi nhánh nộp tiền', 'Chi nhánh lĩnh', 'Chi tiền (chi nhánh lĩnh tiền)',
         'Thu tiền cơ sở khác', 'Chi tiền cơ sở khác',
         'Tổng thu nội bộ', 'Tổng chi nội bộ'
     ]
-    
+
     combined_nv = [nv for nv in desired_nv_order if nv in all_nghiep_vu]
     for nv in all_nghiep_vu:
         if nv not in combined_nv and nv not in ['Tổng Thu', 'Tổng Chi', 'Tổng thu nội bộ', 'Tổng chi nội bộ']:
@@ -414,43 +441,70 @@ def format_summary_dataframe(df_prev, df_curr, all_nghiep_vu, all_coso):
 
     for nv in combined_nv:
         for cs in all_coso:
-            if cs == "Toàn trung tâm": continue
+            if cs == "Toàn trung tâm":
+                continue
             if nv in file1_nv:
-                for dt in ['Toàn bộ', 'Chi nhánh', 'Phòng giao dịch']: 
+                for dt in ['Toàn bộ', 'Chi nhánh', 'Phòng giao dịch']:
                     rows.append({'LoaiNghiepVu': nv, 'CoSo': cs, 'LoaiDoiTuong': dt})
-            else: 
+            else:
                 rows.append({'LoaiNghiepVu': nv, 'CoSo': cs, 'LoaiDoiTuong': 'Toàn bộ'})
 
     for cs in all_coso:
         if cs != "Toàn trung tâm":
-            rows.append({'LoaiNghiepVu': 'Tổng Thu', 'CoSo': cs, 'LoaiDoiTuong': 'Toàn bộ'})
-            rows.append({'LoaiNghiepVu': 'Tổng Chi', 'CoSo': cs, 'LoaiDoiTuong': 'Toàn bộ'})
-            rows.append({'LoaiNghiepVu': 'Tổng thu nội bộ', 'CoSo': cs, 'LoaiDoiTuong': 'Toàn bộ'})
-            rows.append({'LoaiNghiepVu': 'Tổng chi nội bộ', 'CoSo': cs, 'LoaiDoiTuong': 'Toàn bộ'})
+            for tong_nv in ['Tổng Thu', 'Tổng Chi', 'Tổng thu nội bộ', 'Tổng chi nội bộ']:
+                rows.append({'LoaiNghiepVu': tong_nv, 'CoSo': cs, 'LoaiDoiTuong': 'Toàn bộ'})
 
-    rows.append({'LoaiNghiepVu': 'Tổng Thu', 'CoSo': 'Toàn trung tâm', 'LoaiDoiTuong': 'Toàn bộ'})
-    rows.append({'LoaiNghiepVu': 'Tổng Chi', 'CoSo': 'Toàn trung tâm', 'LoaiDoiTuong': 'Toàn bộ'})
-    rows.append({'LoaiNghiepVu': 'Tổng thu nội bộ', 'CoSo': 'Toàn trung tâm', 'LoaiDoiTuong': 'Toàn bộ'})
-    rows.append({'LoaiNghiepVu': 'Tổng chi nội bộ', 'CoSo': 'Toàn trung tâm', 'LoaiDoiTuong': 'Toàn bộ'})
-            
-    base_df = pd.DataFrame(rows).drop_duplicates(subset=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
-    if df_prev.empty or 'LoaiNghiepVu' not in df_prev.columns: df_prev = pd.DataFrame(columns=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
-    if df_curr.empty or 'LoaiNghiepVu' not in df_curr.columns: df_curr = pd.DataFrame(columns=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'])
-        
-    f_df = pd.merge(base_df, df_prev, on=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'], how='left').fillna(0)
-    f_df = pd.merge(f_df, df_curr, on=['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong'], how='left', suffixes=('_Kỳ Trước', '_Kỳ Báo Cáo')).fillna(0)
-    
-    metrics = ['Tinh_Luot', 'Tinh_Phong', 'Bo_VND', 'VND_ThanhTien', 'Bo_USD', 'USD_ThanhTien', 'Bo_EUR', 'EUR_ThanhTien', 'Bo_JPY', 'JPY_ThanhTien', 'Bo_Khac', 'Tinh_KM_Tuyen', 'Tinh_KM_Phong']
-    final_cols = ['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong']
-    for m in metrics: final_cols.extend([f"{m}_Kỳ Trước", f"{m}_Kỳ Báo Cáo"])
+    for tong_nv in ['Tổng Thu', 'Tổng Chi', 'Tổng thu nội bộ', 'Tổng chi nội bộ']:
+        rows.append({'LoaiNghiepVu': tong_nv, 'CoSo': 'Toàn trung tâm', 'LoaiDoiTuong': 'Toàn bộ'})
+
+    key_cols = ['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong']
+    metrics = [
+        'Tinh_Luot', 'Tinh_Phong', 'Bo_VND', 'VND_ThanhTien',
+        'Bo_USD', 'USD_ThanhTien', 'Bo_EUR', 'EUR_ThanhTien',
+        'Bo_JPY', 'JPY_ThanhTien', 'Bo_Khac', 'Tinh_KM_Tuyen', 'Tinh_KM_Phong'
+    ]
+
+    base_df = pd.DataFrame(rows).drop_duplicates(subset=key_cols)
+    for k in key_cols:
+        base_df[k] = base_df[k].astype(str).str.strip()
+
+    def _chuan_hoa_ky(df_ky, hau_to):
+        cols_out = {m: f"{m}{hau_to}" for m in metrics}
+        if df_ky is None or df_ky.empty or not set(key_cols).issubset(df_ky.columns):
+            empty_res = base_df[key_cols].copy()
+            for new_c in cols_out.values():
+                empty_res[new_c] = 0.0
+            return empty_res
+
+        tmp = df_ky.copy()
+        for k in key_cols:
+            tmp[k] = tmp[k].astype(str).str.strip()
+        tmp = tmp.drop_duplicates(subset=key_cols)
+
+        merged = pd.merge(base_df[key_cols], tmp, on=key_cols, how='left')
+        res = merged[key_cols].copy()
+        for m, new_c in cols_out.items():
+            if m in merged.columns:
+                res[new_c] = pd.to_numeric(merged[m], errors='coerce').fillna(0.0)
+            else:
+                res[new_c] = 0.0
+        return res
+
+    prev_part = _chuan_hoa_ky(df_prev, '_Kỳ Trước')
+    curr_part = _chuan_hoa_ky(df_curr, '_Kỳ Báo Cáo')
+
+    f_df = pd.merge(base_df, prev_part, on=key_cols, how='left')
+    f_df = pd.merge(f_df, curr_part, on=key_cols, how='left')
+
+    final_cols = key_cols.copy()
+    for m in metrics:
+        final_cols.extend([f"{m}_Kỳ Trước", f"{m}_Kỳ Báo Cáo"])
     f_df = f_df.reindex(columns=final_cols, fill_value=0.0)
 
-    check_cols = [c for c in f_df.columns if c not in ['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong']]
+    check_cols = [c for c in f_df.columns if c not in key_cols]
     f_df = f_df[(f_df[check_cols] != 0).any(axis=1)].copy()
     return f_df
 
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
 
 def write_to_template(final_table, template_path, output_path, start_prev=None, end_prev=None, start_curr=None, end_curr=None):
     wb = None
@@ -470,30 +524,30 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left_align = Alignment(horizontal='left', vertical='center')
     right_align = Alignment(horizontal='right', vertical='center')
-    
+
     if start_prev and end_prev and start_curr and end_curr:
         ws.insert_rows(1, amount=4)
-        
+
         ws['A1'] = "HỆ THỐNG TRUNG TÂM TIẾP QUỸ & NHNN - BÁO CÁO TỔNG HỢP HOẠT ĐỘNG"
         ws['A1'].font = Font(bold=True, size=13, color="1F4E78")
         ws['A1'].alignment = center_align
-        
+
         ws['A2'] = f"• Kỳ trước: Từ ngày {start_prev.strftime('%d/%m/%Y')} đến {end_prev.strftime('%d/%m/%Y')}"
         ws['A2'].font = Font(italic=True, size=11, color="555555")
         ws['A2'].alignment = center_align
-        
+
         ws['A3'] = f"• Kỳ báo cáo: Từ ngày {start_curr.strftime('%d/%m/%Y')} đến {end_curr.strftime('%d/%m/%Y')}"
         ws['A3'].font = Font(bold=True, size=11, color="1F4E78")
         ws['A3'].alignment = center_align
 
     data_rows = final_table.to_dict(orient='records')
-    
+
     try:
         start_row = 6 if (start_prev and end_prev) else 4
-        
+
         if not os.path.exists(template_path) or ws.max_row <= start_row:
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                final_table.to_excel(writer, index=False, startrow=start_row-1)
+                final_table.to_excel(writer, index=False, startrow=start_row - 1)
             wb = load_workbook(output_path)
             ws = wb.active
             if start_prev and end_prev:
@@ -508,14 +562,14 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
                 cell_val_1 = ws.cell(row=r, column=1).value
                 cell_val_2 = ws.cell(row=r, column=2).value
                 cell_val_3 = ws.cell(row=r, column=3).value
-                
-                if not cell_val_1: 
+
+                if not cell_val_1:
                     continue
-                    
+
                 nv = str(cell_val_1).strip()
                 cs = str(cell_val_2).strip() if cell_val_2 else ""
                 dt = str(cell_val_3).strip() if cell_val_3 else ""
-                
+
                 m = next((d for d in data_rows if str(d.get('LoaiNghiepVu', '')).strip() == nv and str(d.get('CoSo', '')).strip() == cs and str(d.get('LoaiDoiTuong', '')).strip() == dt), None)
                 if m:
                     v_keys = [k for k in m.keys() if k not in ['LoaiNghiepVu', 'CoSo', 'LoaiDoiTuong']]
@@ -523,16 +577,16 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
                         target_col = 4 + idx
                         ws.cell(row=r, column=target_col).value = m[k]
 
-        header_row_idx = start_row - 1 if not os.path.exists(template_path) else start_row - 1
-        
+        header_row_idx = start_row - 1
+
         for col_idx in range(1, ws.max_column + 1):
             col_letter = get_column_letter(col_idx)
             max_len = 0
-            
+
             for row_idx in range(header_row_idx, ws.max_row + 1):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 val = cell.value
-                
+
                 if row_idx == header_row_idx:
                     cell.alignment = center_align
                     cell.font = Font(bold=True, size=10, color="FFFFFF")
@@ -545,15 +599,15 @@ def write_to_template(final_table, template_path, output_path, start_prev=None, 
                         if isinstance(val, (int, float)) and pd.notnull(val):
                             cell.number_format = '#,##0'
                             cell.value = round(float(val))
-                
+
                 val_str = str(val or '')
                 if len(val_str) > max_len:
                     max_len = len(val_str)
-                    
+
             ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
 
     except Exception as e:
         print(f"⚠️ Cảnh báo định dạng Excel: {e}")
-                
+
     wb.save(output_path)
     wb.close()
